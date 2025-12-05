@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { ShieldAlert, X, MapPin, Target } from 'lucide-react';
 import { IMAGE_BASE } from '../services/api';
 
@@ -7,9 +7,8 @@ export default function ThreatAlert({ alert, onClose }) {
   if (!alert) return null;
 
   return (
-    // Added 'key' in App.js ensures this entire div is re-created on new alerts
-    // z-[9999] ensures it is above everything including modals
-    <div className="fixed top-6 right-6 z-[9999] max-w-sm w-full animate-in slide-in-from-right duration-500 fade-in">
+    // 🟢 Key Fix: High Z-Index and Animation classes
+    <div className="fixed top-6 right-6 z-[9999] max-w-sm w-full animate-in slide-in-from-right duration-500 fade-in fill-mode-forwards">
       <div className="bg-red-950/95 backdrop-blur-xl border-2 border-red-500 text-white rounded-xl shadow-[0_0_60px_rgba(220,38,38,0.6)] overflow-hidden">
         
         {/* Header - Blinking to indicate active attention needed */}

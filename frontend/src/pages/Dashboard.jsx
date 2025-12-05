@@ -1,17 +1,114 @@
-import React, { useState } from 'react';
-import { Plus, Search, Loader2, Wifi } from 'lucide-react';
-import CameraCard from '../components/CameraCard';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Plus, Search, Loader2, Wifi, ServerCrash, 
+  Cctv, Activity, Signal, Power, Trash2
+} from 'lucide-react';
 import { useCameras } from '../hooks/useCameras';
-import { scanNetwork } from '../services/api';
+import { scanNetwork, getStreamUrl } from '../services/api';
+
+// --- SUB-COMPONENT: PROFESSIONAL SURVEILLANCE FEED ---
+const SurveillanceFeed = ({ camera, fps, onToggle, onDelete }) => {
+  const [time, setTime] = useState(new Date());
+  const [isHovered, setIsHovered] = useState(false);
+
+  // Memoize stream URL to prevent reloading on every render
+  const streamSrc = useMemo(() => {
+    return `${getStreamUrl(camera.streamUrl, camera.name)}&t=${Date.now()}`;
+  }, [camera.status, camera.streamUrl, camera.name]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div 
+      className="relative bg-zinc-950 border border-zinc-800 aspect-video group overflow-hidden shadow-2xl"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div className="w-full h-full relative">
+        {camera.status === 'Active' ? (
+          <img 
+            src={streamSrc}
+            alt={camera.name}
+            className="w-full h-full object-cover"
+            onError={(e) => {e.target.style.display='none'; e.target.nextSibling.style.display='flex'}} 
+          />
+        ) : null}
+
+        <div className={`absolute inset-0 flex flex-col items-center justify-center bg-black ${camera.status === 'Active' ? 'hidden' : 'flex'}`}>
+            <Signal className="text-zinc-700 mb-2 animate-pulse" size={48} />
+            <span className="text-zinc-500 font-mono tracking-[0.2em] text-sm">NO SIGNAL</span>
+        </div>
+      </div>
+
+      <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
+        <div className="flex justify-between items-start">
+          <div className="bg-black/60 backdrop-blur-sm px-2 py-1 border-l-2 border-emerald-500">
+            <h3 className="text-white font-mono font-bold text-xs uppercase tracking-wider">{camera.name}</h3>
+          </div>
+          <div className="flex gap-2">
+            {camera.status === 'Active' && (
+              <>
+                <div className="flex items-center gap-2 bg-red-950/80 px-2 py-1 rounded-sm border border-red-900">
+                   <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
+                   <span className="text-red-500 font-mono text-xs font-bold">REC</span>
+                </div>
+                <div className="bg-black/60 px-2 py-1 rounded-sm border border-zinc-800">
+                   <span className={`font-mono text-xs ${fps > 24 ? 'text-emerald-400' : fps > 10 ? 'text-yellow-400' : 'text-red-400'}`}>
+                      {fps || 0} FPS
+                   </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-end">
+           <div className="font-mono text-xs text-zinc-300 bg-black/40 px-2 py-1">
+             {time.toLocaleDateString()} {time.toLocaleTimeString()}
+           </div>
+        </div>
+      </div>
+
+      <div className={`absolute inset-0 bg-black/60 flex items-center justify-center gap-4 transition-opacity duration-200 pointer-events-auto ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+         <button onClick={() => onToggle(camera._id, camera.status)} className={`p-3 rounded-full border-2 transition-all hover:scale-110 ${camera.status === 'Active' ? 'border-red-500 bg-red-500/20 text-red-500' : 'border-emerald-500 bg-emerald-500/20 text-emerald-500'}`}>
+           <Power size={24} />
+         </button>
+         <button onClick={() => onDelete(camera._id)} className="p-3 rounded-full border-2 border-zinc-500 bg-zinc-800 text-zinc-300 hover:border-red-500 hover:text-red-500 hover:bg-red-950 transition-all hover:scale-110">
+           <Trash2 size={24} />
+         </button>
+      </div>
+    </div>
+  );
+};
 
 export default function Dashboard() {
   const { cameras, addCamera, toggleCamera, deleteCamera } = useCameras();
+  const [fpsData, setFpsData] = useState({});
   const [showModal, setShowModal] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [foundDevices, setFoundDevices] = useState([]);
-  
-  // Manual Add State
+  const [scanStatus, setScanStatus] = useState('');
   const [newCam, setNewCam] = useState({ name: '', location: '', streamUrl: '' });
+
+  // 🟢 POLL FPS DATA FROM BACKEND
+  useEffect(() => {
+    const interval = setInterval(async () => {
+       try {
+         // Assuming backend is at port 5000 based on previous context
+         const res = await fetch('http://localhost:5000/fps');
+         if (res.ok) {
+            const data = await res.json();
+            setFpsData(data);
+         }
+       } catch (e) {
+         // Silently fail on connection error to avoid console spam
+       }
+    }, 1000); // Update every second
+    return () => clearInterval(interval);
+  }, []);
 
   const handleManualSubmit = (e) => {
     e.preventDefault();
@@ -22,148 +119,94 @@ export default function Dashboard() {
 
   const handleScan = async () => {
     setIsScanning(true);
+    setScanStatus('scanning');
     setFoundDevices([]);
     try {
         const devices = await scanNetwork();
         setFoundDevices(devices);
+        setScanStatus('complete');
     } catch (error) {
-        console.error("Scan failed", error);
+        setScanStatus('error');
     } finally {
         setIsScanning(false);
     }
   };
 
-  const addFoundDevice = (device) => {
-      addCamera(device);
-      setFoundDevices(prev => prev.filter(d => d.streamUrl !== device.streamUrl));
-  };
-
   return (
-    <div className="p-8 pb-20">
-      {/* Header */}
-      <div className="flex justify-between items-end mb-10">
-        <div>
-            <h2 className="text-3xl font-bold text-white mb-1">Command Center</h2>
-            <p className="text-slate-400">Manage active surveillance nodes.</p>
+    <div className="bg-black min-h-screen text-zinc-300 font-sans selection:bg-emerald-500/30">
+      <div className="sticky top-0 z-40 bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800 px-6 py-4 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="bg-emerald-900/30 p-2 rounded border border-emerald-500/30">
+             <Cctv className="text-emerald-500" size={24} />
+          </div>
+          <div>
+            <h1 className="text-white font-bold text-lg tracking-tight leading-none">SECURITY OPS</h1>
+            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">System Online • v2.4.0</p>
+          </div>
         </div>
-        
-        <div className="flex gap-3">
-            <button onClick={() => setShowModal('scan')} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium shadow-lg shadow-indigo-900/20 transition-all">
-                <Search size={18} /> Auto-Scan Network
-            </button>
-            <button onClick={() => setShowModal('manual')} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium border border-slate-600 transition-all">
-                <Plus size={18} /> Manual Add
-            </button>
+        <div className="flex items-center gap-3">
+           <button onClick={() => { setShowModal('scan'); setScanStatus('idle'); setFoundDevices([]); }} className="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-2 border border-zinc-700 transition-all">
+             <Search size={14} /> Auto-Discovery
+           </button>
+           <button onClick={() => setShowModal('manual')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all">
+             <Plus size={14} /> Add Node
+           </button>
         </div>
       </div>
 
-      {/* Grid */}
-      {cameras.length === 0 ? (
-        <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/50">
-            <div className="p-4 bg-slate-800 rounded-full mb-4">
-                <Wifi size={32} className="text-slate-500" />
-            </div>
-            <p className="text-slate-400 font-medium">No cameras detected.</p>
-            <button onClick={() => setShowModal('scan')} className="text-indigo-400 hover:text-indigo-300 text-sm mt-2 underline">Scan for devices?</button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {cameras.map(cam => (
-            <CameraCard key={cam._id} camera={cam} onToggle={toggleCamera} onDelete={deleteCamera} />
-            ))}
-        </div>
-      )}
-
-      {/* --- MODALS --- */}
-
-      {/* SCAN MODAL */}
-      {showModal === 'scan' && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-0 rounded-2xl w-[500px] border border-slate-700 overflow-hidden shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-                <h3 className="text-xl font-bold text-white">Network Discovery</h3>
-                <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-            
-            <div className="p-6">
-                <p className="text-slate-400 text-sm mb-6">
-                    Scanning local network (192.168.x.x) for devices running <b>IP Webcam</b> on port <b>8080</b>.
-                </p>
-
-                <div className="flex justify-center mb-6">
-                    {!isScanning && foundDevices.length === 0 && (
-                        <button onClick={handleScan} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-emerald-900/20 transition-all flex items-center gap-2">
-                            Start Scan
-                        </button>
-                    )}
-                    
-                    {isScanning && (
-                        <div className="flex flex-col items-center text-indigo-400">
-                            <Loader2 size={48} className="animate-spin mb-4" />
-                            <span className="font-mono text-xs uppercase tracking-widest">Scanning Subnet...</span>
-                        </div>
-                    )}
-                </div>
-
-                <div className="space-y-3 max-h-60 overflow-y-auto">
-                    {foundDevices.map((device, idx) => (
-                        <div key={idx} className="bg-slate-800 p-4 rounded-lg flex justify-between items-center border border-slate-700">
-                            <div>
-                                <p className="font-bold text-white">{device.name}</p>
-                                <p className="text-xs text-slate-500 font-mono">{device.streamUrl}</p>
-                            </div>
-                            <button onClick={() => addFoundDevice(device)} className="bg-indigo-600 hover:bg-indigo-500 text-xs font-bold px-3 py-1.5 rounded text-white">
-                                + ADD
-                            </button>
-                        </div>
-                    ))}
-                    {!isScanning && foundDevices.length === 0 && (
-                        <p className="text-center text-slate-600 text-sm">No new devices found.</p>
-                    )}
-                </div>
-            </div>
+      <div className="p-6">
+        {cameras.length === 0 ? (
+          <div className="h-[70vh] flex flex-col items-center justify-center border-2 border-dashed border-zinc-800 rounded-xl bg-zinc-900/20">
+              <Wifi size={64} className="text-zinc-600" />
+              <p className="text-zinc-500 font-mono mt-6 text-lg">NO ACTIVE VIDEO FEEDS</p>
           </div>
-        </div>
-      )}
-
-      {/* MANUAL MODAL */}
-      {showModal === 'manual' && (
-        
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-6 rounded-2xl w-96 border border-slate-700 shadow-2xl">
-            <h3 className="text-xl font-bold mb-6 text-white">Add Device Manually</h3>
-            <form onSubmit={handleManualSubmit} className="space-y-4">
-                {/* Inside the Manual Modal Form */}
-                    <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stream URL / ID</label>
-                    <input 
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" 
-                        placeholder="http://192.168.0.101:8080/video" 
-                        value={newCam.streamUrl} 
-                        onChange={e => setNewCam({...newCam, streamUrl: e.target.value})} 
-                        required 
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                        *For IP Webcam App, must end with <b>/video</b>
-                    </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+             {cameras.map(cam => (
+               <SurveillanceFeed 
+                 key={cam._id} 
+                 camera={cam} 
+                 fps={fpsData[cam.name] || 0} // Pass Real FPS here
+                 onToggle={toggleCamera} 
+                 onDelete={deleteCamera} 
+               />
+             ))}
+          </div>
+        )}
+      </div>
+      
+      {/* MODALS */}
+      {(showModal === 'scan' || showModal === 'manual') && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-zinc-900 border border-zinc-700 w-[500px] shadow-2xl overflow-hidden">
+            <div className="bg-zinc-800 px-6 py-4 flex justify-between items-center border-b border-zinc-700">
+               <h3 className="text-white font-bold font-mono uppercase tracking-wider text-sm flex items-center gap-2">
+                 {showModal === 'scan' ? 'Network Discovery' : 'Manual Configuration'}
+               </h3>
+               <button onClick={() => setShowModal(false)} className="text-zinc-500 hover:text-white">✕</button>
+            </div>
+            {showModal === 'scan' && (
+              <div className="p-6">
+                 <div className="bg-black p-4 rounded border border-zinc-800 font-mono text-xs text-emerald-500 mb-6 h-32 overflow-y-auto">
+                    {scanStatus === 'scanning' ? <p className="animate-pulse">{'>'} Probing subnet...</p> : <p>{'>'} Ready.</p>}
+                    {scanStatus === 'complete' && <p>{'>'} Found {foundDevices.length} devices.</p>}
+                 </div>
+                 {foundDevices.map((dev, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-zinc-800 p-3 rounded mb-2">
+                       <p className="text-white text-sm">{dev.name}</p>
+                       <button onClick={() => {addCamera(dev); setFoundDevices(p => p.filter(d => d !== dev))}} className="text-xs bg-emerald-600 text-white px-3 py-1 rounded">ADD</button>
                     </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Device Name</label>
-                <input className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" placeholder="e.g. Backyard Cam" value={newCam.name} onChange={e => setNewCam({...newCam, name: e.target.value})} required />
+                 ))}
+                 {scanStatus === 'idle' && <button onClick={handleScan} className="w-full py-3 bg-zinc-800 text-white border border-zinc-600">Start Scan</button>}
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Location</label>
-                <input className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" placeholder="e.g. Sector 4" value={newCam.location} onChange={e => setNewCam({...newCam, location: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stream URL / ID</label>
-                <input className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" placeholder="http://192.168... OR 0" value={newCam.streamUrl} onChange={e => setNewCam({...newCam, streamUrl: e.target.value})} required />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors">Cancel</button>
-                <button type="submit" className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow-lg shadow-indigo-900/20 transition-colors">Register</button>
-              </div>
-            </form>
+            )}
+            {showModal === 'manual' && (
+               <form onSubmit={handleManualSubmit} className="p-6 space-y-4">
+                  <input className="w-full bg-black border border-zinc-700 p-2 text-white text-sm" placeholder="Name" value={newCam.name} onChange={e => setNewCam({...newCam, name: e.target.value})} required />
+                  <input className="w-full bg-black border border-zinc-700 p-2 text-white text-sm" placeholder="URL / ID" value={newCam.streamUrl} onChange={e => setNewCam({...newCam, streamUrl: e.target.value})} required />
+                  <button type="submit" className="w-full py-3 bg-emerald-600 text-white font-bold">Register</button>
+               </form>
+            )}
           </div>
         </div>
       )}

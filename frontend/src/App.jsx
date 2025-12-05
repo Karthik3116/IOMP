@@ -17,22 +17,26 @@ function App() {
     socket.on('new_alert', (newReport) => {
       console.log("🚨 GLOBAL ALERT RECEIVED:", newReport);
       
-      // 1. Force the state to update (even if it's a new object)
-      setCurrentAlert(newReport);
-
-      // 2. Play Sound safely (Prevent browser blocking errors from stopping the app)
+      // 1. Play Sound immediately
       try {
         alertSound.currentTime = 0;
         const playPromise = alertSound.play();
-        
         if (playPromise !== undefined) {
-          playPromise.catch(error => {
-            console.warn("Audio autoplay blocked by browser:", error);
-          });
+          playPromise.catch(error => console.warn("Audio autoplay blocked:", error));
         }
       } catch (e) {
         console.error("Audio play failed", e);
       }
+
+      // 2. 🟢 FORCE UI RESET
+      // First, clear the current alert to trigger an 'unmount'
+      setCurrentAlert(null);
+
+      // Then, after a tiny delay, show the new one. 
+      // This forces React to mount a fresh component and replay the slide-in animation.
+      setTimeout(() => {
+        setCurrentAlert(newReport);
+      }, 100);
     });
 
     return () => socket.off('new_alert');
@@ -41,12 +45,11 @@ function App() {
   return (
     <div className="min-h-screen flex bg-slate-950 text-white font-sans overflow-hidden relative">
       
-      {/* 🔴 FIX: Added 'key' prop. 
-          Using timestamp ensures React unmounts the old alert and 
-          mounts the new one completely, re-triggering the 'slide-in' animation. 
+      {/* Using a unique key (timestamp or ID) ensures React treats 
+          this as a distinct element instance 
       */}
       <ThreatAlert 
-        key={currentAlert ? currentAlert.timestamp : 'no-alert'} 
+        key={currentAlert ? (currentAlert._id || currentAlert.timestamp) : 'no-alert'} 
         alert={currentAlert} 
         onClose={() => setCurrentAlert(null)} 
       />

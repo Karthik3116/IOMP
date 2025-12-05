@@ -1,3 +1,183 @@
+Based on our most recent extensive work, this report documents the **Real-Time Drone Detection & Alert System**.
+
+This document is structured specifically to be context-rich for an AI. You can feed this entire text into any LLM (ChatGPT, Claude, or a fresh Gemini instance) to generate accurate SRS documents, UML diagrams (Class, Sequence, Activity), or Architecture schemas without needing further context.
+
+-----
+
+# System Design Document: AI-Powered Drone Detection System
+
+## 1\. Project Overview
+
+**System Name:** SkyGuard (Internal Project Name: Drone-vs-Bird Detection)
+**Description:** A hybrid computer vision system designed to detect, track, and classify aerial objects in real-time. The system specifically distinguishes between "Drones" and "Birds" using a custom-trained YOLOv11 model. Upon detecting a drone with high confidence, the system triggers visual alerts, captures evidence (snapshots), and logs the event.
+**Primary Goal:** Automated airspace security monitoring to prevent unauthorized drone incursions while filtering out natural wildlife (birds).
+
+## 2\. Technical Stack & Dependencies
+
+### 2.1 AI & Backend (The Inference Engine)
+
+  * **Language:** Python 3.9+
+  * **Framework:** Flask (Micro-framework for serving video streams and APIs).
+  * **Core Libraries:**
+      * `ultralytics`: For loading and running the YOLOv11 model.
+      * `opencv-python-headless`: For video frame capture, image processing, and drawing bounding boxes.
+      * `cvzone`: For simplified UI overlays (text rectangles, corner rectangles).
+      * `math`: For confidence score calculation.
+      * `pygame`: (Optional) For handling audio alerts on detection.
+
+### 2.2 Frontend (The User Interface)
+
+  * **Framework:** React.js (via Vite build tool).
+  * **Styling:** Tailwind CSS.
+  * **Language:** JavaScript/JSX.
+  * **Communication Protocol:** HTTP (MJPEG Stream for video), REST API (for logs/stats).
+
+### 2.3 Machine Learning Model
+
+  * **Architecture:** YOLOv11 (You Only Look Once - v11n or v11s).
+  * **Training Data:** Custom dataset containing labeled images of drones and birds.
+  * **Classes:**
+      * `Class 0`: Drone
+      * `Class 1`: Bird
+  * **Weights File:** `best.pt` (located in the root directory).
+
+-----
+
+## 3\. System Architecture
+
+[Image of client server architecture diagram]
+
+The system follows a **Client-Server Architecture** with a specialized Inference Microservice.
+
+1.  **Input Layer:** A physical webcam or RTSP stream provides raw video frames.
+2.  **Processing Layer (Flask):**
+      * Captures the frame.
+      * Passes frame to YOLOv11 model.
+      * Model returns bounding box coordinates `(x1, y1, x2, y2)`, Class ID, and Confidence Score.
+      * Python logic filters results (Confidence \> 0.6).
+      * Annotated frame is encoded to JPEG.
+3.  **Presentation Layer (React):**
+      * Consumes the Flask stream via an `<img src="...">` tag pointing to the video feed route.
+      * Displays a dashboard with detection counters and alert status.
+
+-----
+
+## 4\. Module Breakdown & Data Flow
+
+### 4.1 The Vision Module (`app.py`)
+
+This is the core logic.
+
+  * **Initialization:** Loads `best.pt` and labels `['Drone', 'Bird']`.
+  * **The Detection Loop:**
+    1.  Read `cap.read()`.
+    2.  `model(img)` -\> Returns `results`.
+    3.  Iterate through detections.
+    4.  **Logic Gate:**
+          * IF `Class == Drone` AND `Confidence > 0.6`:
+              * Change Bounding Box Color to **RED**.
+              * Trigger System Alert (Set global flag `ALERT = True`).
+              * Save Snapshot to `/detections` folder.
+          * IF `Class == Bird`:
+              * Change Bounding Box Color to **GREEN**.
+              * Log as "Neutral".
+    5.  **MJPEG Generator:** The processed image is yielded as a byte stream: `yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')`.
+
+### 4.2 The API Interface
+
+The Python backend exposes these endpoints:
+
+  * `GET /video_feed`: Returns the multipart/x-mixed-replace response (the video stream).
+  * `GET /status`: Returns JSON: `{ "alert_active": true/false, "drones_detected": 5 }`.
+  * `GET /snapshot`: Returns the latest captured image of a detected drone.
+
+### 4.3 The Frontend Dashboard
+
+  * **Video Component:** Renders the live feed.
+  * **Sidebar:** Shows history of detections.
+  * **Alert Banner:** Flashes Red when `/status` returns `alert_active: true`.
+
+-----
+
+## 5\. Functional Requirements (For SRS)
+
+1.  **Real-time Detection:** The system must process video at a minimum of 15 FPS.
+2.  **differentiation:** The system must strictly distinguish between birds and drones to minimize false positives.
+3.  **Visual Feedback:** Drones must be boxed in Red; Birds in Green. Confidence percentages must be visible.
+4.  **Evidence Collection:** Upon detecting a drone, the system must automatically save a timestamped image file locally.
+5.  **Remote Access:** The UI must be accessible via a web browser on the local network.
+
+-----
+
+## 6\. Logic & Pseudocode (For Sequence Diagrams)
+
+**Scenario: Drone Enters Airspace**
+
+```text
+Actor: User (Monitoring)
+System: WebUI, FlaskBackend, YOLO_Model, Camera
+
+1. User opens WebUI.
+2. WebUI requests GET /video_feed from FlaskBackend.
+3. FlaskBackend starts Camera capture loop.
+4. LOOP:
+    a. Camera captures Frame.
+    b. FlaskBackend sends Frame to YOLO_Model.
+    c. YOLO_Model returns [Class: Drone, Conf: 0.85, Box: Coordinates].
+    d. FlaskBackend detects (Class == Drone).
+    e. FlaskBackend draws RED Box and text "Drone 0.85".
+    f. FlaskBackend saves "detection_timestamp.jpg".
+    g. FlaskBackend encodes Frame to JPEG.
+    h. FlaskBackend streams bytes to WebUI.
+5. WebUI updates DOM to show Video Stream.
+```
+
+-----
+
+## 7\. Data Structures (For Class Diagrams)
+
+**Detection Object (Internal Python)**
+
+```python
+class Detection:
+    id: int
+    timestamp: datetime
+    object_class: str ("Drone" | "Bird")
+    confidence: float (0.00 to 1.00)
+    bounding_box: tuple (x1, y1, x2, y2)
+    image_path: str
+```
+
+**API Response (JSON)**
+
+```json
+{
+  "system_status": "active",
+  "current_threat_level": "high",
+  "total_drones_today": 12,
+  "last_detection": "2023-10-27T10:00:00Z"
+}
+```
+
+-----
+
+## 8\. Non-Functional Requirements
+
+  * **Latency:** Video stream delay should not exceed 200ms.
+  * **Accuracy:** Model mAP (Mean Average Precision) should be \> 0.8 for the Drone class.
+  * **Reliability:** The Python script must auto-recover if the camera disconnects.
+
+-----
+
+### How to use this report:
+
+  * **To generate a Use Case Diagram:** Paste this into an AI and ask: *"Based on Section 5 and 6, generate PlantUML code for a Use Case diagram showing the Actors 'Security Officer' and 'System'."*
+  * **To generate an SRS:** Paste this and ask: *"Write a formal IEEE 830 Software Requirements Specification based on this data."*
+  * **To generate a Class Diagram:** Paste this and ask: *"Create a Mermaid.js class diagram based on the Data Structures in Section 7."*
+
+**Would you like me to generate the PlantUML code for the Sequence Diagram right now based on this report?**
+
+
 PROJECT REPORT: DroneGuard
 Real-Time AI Drone Detection and Security Monitoring System
 
@@ -192,3 +372,4 @@ def run_inference(frame):
             if class_name == 'drone':
                 # Trigger Alert Logic
                 pass
+
